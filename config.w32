@@ -1,0 +1,5 @@
+ARG_ENABLE("flashpoint", "enable flashpoint support", "no");
+
+if (PHP_FLASHPOINT != "no") {
+    EXTENSION("flashpoint", "flashpoint.c");
+}
