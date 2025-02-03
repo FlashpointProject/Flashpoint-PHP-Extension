@@ -10,6 +10,7 @@
 #include "php_flashpoint.h"
 
 static int (*original_zend_stream_open_function)(const char *filename, zend_file_handle *handle) = NULL;
+zif_handler original_file;
 zif_handler original_file_get_contents;
 
 #define BUFFER_SIZE 1024
@@ -46,7 +47,6 @@ int http_get_and_save(const char* url, const char* file_path, const int path_len
     }
     
     // Resolve hostname to IP address
-    php_printf("[Flashpoint - Network] Resolving host %s\n", hostname);
     struct hostent *he = gethostbyname(hostname);
     if (he == NULL) {
         php_printf("[Flashpoint - Network] Bad hostname resolution\n");
@@ -72,8 +72,6 @@ int http_get_and_save(const char* url, const char* file_path, const int path_len
              "Ignore-PHP: yes\r\n"
              "Connection: close\r\n"
              "\r\n", path, hostname);
-
-    php_printf("[Flashpoint - Network] Performing Request:\n%s", request);
     
 
     // Send HTTP request
@@ -245,7 +243,7 @@ static int custom_zend_stream_open(const char *filename, zend_file_handle *handl
     if (full_path == NULL) {
         php_printf("[Flashpoint] Error getting full path for file: %s\n", filename);
     } else {
-        php_printf("[Flashpoint] (hook) Require / Include: %s\n", full_path);
+        php_printf("[Flashpoint] [require / include]: %s\n", full_path);
         handle_file_access(full_path);
     }
     
@@ -253,29 +251,41 @@ static int custom_zend_stream_open(const char *filename, zend_file_handle *handl
     return original_zend_stream_open_function(filename, handle);
 }
 
-PHP_FUNCTION(custom_file_get_contents)
+PHP_FUNCTION(custom_file)
 {
     char *filename;
-    size_t filename_len;
-    zend_bool use_include_path = 0;
-    zval *zcontext = NULL;
-    zend_long offset = -1;
-    zend_long maxlen = PHP_STREAM_COPY_ALL;
+	size_t filename_len;
 
-	ZEND_PARSE_PARAMETERS_START(1, 5)
+	/* Parse arguments */
+	ZEND_PARSE_PARAMETERS_START(1, 3)
 		Z_PARAM_PATH(filename, filename_len)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_BOOL(use_include_path)
-		Z_PARAM_RESOURCE_EX(zcontext, 1, 0)
-		Z_PARAM_LONG(offset)
-		Z_PARAM_LONG(maxlen)
 	ZEND_PARSE_PARAMETERS_END();
 
     char *full_path = get_full_path(filename);
     if (full_path == NULL) {
         php_printf("[Flashpoint] Error getting full path for file: %s\n", filename);
     } else {
-        php_printf("[Flashpoint] (hook) File get contents: %s\n", full_path);
+        php_printf("[Flashpoint] [file]: %s\n", full_path);
+        handle_file_access(full_path);
+    }
+
+    original_file(INTERNAL_FUNCTION_PARAM_PASSTHRU);
+}
+
+PHP_FUNCTION(custom_file_get_contents)
+{
+    char *filename;
+    size_t filename_len;
+
+	ZEND_PARSE_PARAMETERS_START(1, 5)
+		Z_PARAM_PATH(filename, filename_len)
+	ZEND_PARSE_PARAMETERS_END();
+
+    char *full_path = get_full_path(filename);
+    if (full_path == NULL) {
+        php_printf("[Flashpoint] Error getting full path for file: %s\n", filename);
+    } else {
+        php_printf("[Flashpoint] [file_get_contents]: %s\n", full_path);
         handle_file_access(full_path);
     }
 
@@ -302,6 +312,13 @@ PHP_MINIT_FUNCTION(flashpoint)
     if (original != NULL) {
         original_file_get_contents = original->internal_function.handler;
         original->internal_function.handler = PHP_FN(custom_file_get_contents);
+    }
+
+    original = zend_hash_str_find_ptr(CG(function_table), "file", sizeof("file")-1);
+
+    if (original != NULL) {
+        original_file = original->internal_function.handler;
+        original->internal_function.handler = PHP_FN(custom_file);
     }
 
     return SUCCESS;
